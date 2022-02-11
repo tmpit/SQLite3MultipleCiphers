@@ -1,6 +1,6 @@
 ## This is a fork of SQLite3MultipleCiphers intended to add support for compiling for iOS.
 
-Tags suffixed with "-ios" are modified versions of the tags in the original repo with added support for compiling against the iOS SDK.
+Branches suffixed with "-ios" are modified versions of tags in the original repo with added support for compiling against the iOS SDK.
 
 # SQLite3MultipleCiphers
 
