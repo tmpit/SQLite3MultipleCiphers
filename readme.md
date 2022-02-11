@@ -1,3 +1,5 @@
+# This is a fork of SQLite3MultipleCiphers intended to add support for compiling for iOS.
+
 # SQLite3MultipleCiphers
 
 The project **SQLite3 Multiple Ciphers** implements an encryption extension for [SQLite](https://www.sqlite.org) with support for multiple ciphers. In the past the encryption extension was bundled with the project [wxSQLite3](https://github.com/utelle/wxsqlite3), which provides a thin SQLite3 database wrapper for [wxWidgets](https://www.wxwidgets.org/).
