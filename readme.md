@@ -4,6 +4,8 @@ This fork is intended to add support for compiling for iOS.
 
 Each tag in the upstream repo is tagged here as *\<tag>_ios/\<our version>* where *\<tag>* is the upstream tag and *\<our version>* is a single incrementing number unique for an upstream tag that represents releases in this repository against the same upstream tag. *\<our version>* starts at 1 for each upstream tag.
 
+To release a new tag, run the `patch_tag.sh` script.
+
 # SQLite3MultipleCiphers
 
 The project **SQLite3 Multiple Ciphers** implements an encryption extension for [SQLite](https://www.sqlite.org) with support for multiple ciphers. In the past the encryption extension was bundled with the project [wxSQLite3](https://github.com/utelle/wxsqlite3), which provides a thin SQLite3 database wrapper for [wxWidgets](https://www.wxwidgets.org/).
