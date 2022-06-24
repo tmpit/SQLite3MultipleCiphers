@@ -14,6 +14,23 @@ The code was mainly developed under Windows, but was tested under Linux as well.
 
 ## Version history
 
+* 1.4.4 - *May 2022*
+  - Based on SQLite version 3.38.5
+  - Added optional support for the SQLite extensions COMPRESS, SQLAR, and ZIPFILE
+* 1.4.3 - *May 2022*
+  - Based on SQLite version 3.38.5
+* 1.4.2 - *April 2022*
+  - Based on SQLite version 3.38.3
+* 1.4.1 - *April 2022*
+  - Based on SQLite version 3.38.2
+  - Fix issue #74 (only debug builds are affected)
+* 1.4.0 - *April 2022*
+  - Based on SQLite version 3.38.2
+  - Removed global VFS structure to resolve issue #73
+* 1.3.10 - *March 2022*
+  - Based on SQLite version 3.38.2
+* 1.3.9 - *March 2022*
+  - Based on SQLite version 3.38.1
 * 1.3.8 - *February 2022*
   - Based on SQLite version 3.38.0
   - Updated build files (JSON extension is now integral part of SQLite)
