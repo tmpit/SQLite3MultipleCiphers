@@ -1,7 +1,8 @@
 ## A fork of SQLite3MultipleCiphers
 
 This fork is intended to add support for compiling for iOS.
-Each tag in the upstream repo is tagged here as <tag>_ios/<our version> where <tag> is the upstream tag and <our version> is a single incrementing number unique within an upstream tag that represents releases in this repository against the same upstream tag. <our version> starts at 1 for each upstream tag.
+
+Each tag in the upstream repo is tagged here as *\<tag>_ios/\<our version>* where *\<tag>* is the upstream tag and *\<our version>* is a single incrementing number unique for an upstream tag that represents releases in this repository against the same upstream tag. *\<our version>* starts at 1 for each upstream tag.
 
 # SQLite3MultipleCiphers
 
