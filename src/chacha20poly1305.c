@@ -369,7 +369,7 @@ fail:
   return 0;
 }
 
-#if defined(__APPLE__) && defined(__MAC_10_12)
+#if defined(__APPLE__) && defined(__MAC_10_12) && __MAC_OS_X_VERSION_MAX_ALLOWED >= __MAC_10_12
 #include <sys/random.h>
 #endif
 

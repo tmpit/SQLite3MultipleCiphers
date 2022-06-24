@@ -22,7 +22,11 @@
 /* --- CLang --- */
 #elif defined(__clang__)
 
-#if __has_attribute(target) && __has_include(<wmmintrin.h>) && (defined(__x86_64__) || defined(__i386))
+#if defined(__APPLE__) && defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR
+#define IS_APPLE_SIMULATOR
+#endif
+
+#if __has_attribute(target) && __has_include(<wmmintrin.h>) && (defined(__x86_64__) || defined(__i386)) && !defined(IS_APPLE_SIMULATOR)
 #define HAS_AES_HARDWARE AES_HARDWARE_NI
 
 #elif __has_attribute(target) && __has_include(<arm_neon.h>) && (defined(__aarch64__))
