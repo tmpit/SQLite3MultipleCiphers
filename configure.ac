@@ -1,10 +1,10 @@
 dnl Process this script with autoconf to create configure for sqlite3mc library
 dnl
-dnl Copyright (C) 2019-2022 Ulrich Telle <ulrich@telle-online.de>
+dnl Copyright (C) 2019-2024 Ulrich Telle <ulrich@telle-online.de>
 dnl
 dnl This file is covered by the same licence as the entire SQLite3 Multiple Ciphers package.
 
-AC_INIT([sqlite3mc], [1.4.4], [ulrich@telle-online.de])
+AC_INIT([sqlite3mc], [1.8.4], [ulrich@telle-online.de])
 
 dnl This is the version tested with, might work with earlier ones.
 AC_PREREQ([2.69])
@@ -16,22 +16,6 @@ AC_CONFIG_MACRO_DIR([admin/m4])
 AM_INIT_AUTOMAKE([1.11 foreign subdir-objects])
 AM_MAINTAINER_MODE([enable])
 AM_SILENT_RULES([yes])
-
-dnl Allow adding MSW-specific fragments to the makefile.
-case "${host}" in
-    *-*-cygwin* )
-        USE_MSW=1
-        ;;
-
-    *-*-mingw32* )
-        USE_MSW=1
-        ;;
-esac
-AM_CONDITIONAL(USE_MSW, [test -n "$USE_MSW"])
-
-if test -n "$USE_MSW"; then
-    AC_CHECK_TOOL([WINDRES], [windres], no)
-fi
 
 LT_INIT()
 AC_PROG_CXX
@@ -97,10 +81,19 @@ AC_ARG_WITH([rc4],
     [AS_HELP_STRING([--without-rc4],
         [Disable support for System.Data.SQLite RC4 Encryption])],
     [],
-    [with_sqlcipher=yes])
+    [with_rc4=yes])
 
 AS_IF([test "x$with_rc4" = xno],
-    [AC_DEFINE([HAVE_CIPHER_SQLCIPHER], [0], [Define if you have System.Data.SQLite RC4  disabled])])
+    [AC_DEFINE([HAVE_CIPHER_RC4], [0], [Define if you have System.Data.SQLite RC4  disabled])])
+
+AC_ARG_WITH([ascon128],
+    [AS_HELP_STRING([--without-ascon128],
+        [Disable support for Ascon-128 Encryption])],
+    [],
+    [with_ascon128=yes])
+
+AS_IF([test "x$with_ascon128" = xno],
+    [AC_DEFINE([HAVE_CIPHER_ASCON128], [0], [Define if you have Ascon-128  disabled])])
 
 dnl Enable cipher codec
 
@@ -110,7 +103,8 @@ AC_ARG_ENABLE(codec,
                               aes256: AES 256 Bit CBC Encryption
                               chacha20 [default]: ChaCha20-Poly1305 Encryption
                               sqlcipher: SQLCipher Encryption
-                              rc4: System.Data.SQLite RC4 Encryption],
+                              rc4: System.Data.SQLite RC4 Encryption
+                              ascon128: Ascon-128 Encryption],
       [if   test "x$enableval" = "xaes128" && test "x$with_aes128cbc" = xyes ; then
         codec_type=CODEC_TYPE_AES128
       elif test "x$enableval" = "xaes256" && test "x$with_aes256cbc" = xyes ; then
@@ -121,6 +115,8 @@ AC_ARG_ENABLE(codec,
         codec_type=CODEC_TYPE_SQLCIPHER
       elif test "x$enableval" = "xrc4" && test "x$with_rc4" = xyes ; then
         codec_type=CODEC_TYPE_RC4
+      elif test "x$enableval" = "xascon128" && test "x$with_ascon128" = xyes ; then
+        codec_type=CODEC_TYPE_ASCON128
       else
         echo
         echo "Error!"
@@ -134,7 +130,8 @@ AS_IF([test "x$with_aes128cbc" = xno &&
        test "x$with_aes256cbc" = xno &&
        test "x$with_chacha20" = xno &&
        test "x$with_sqlcipher" = xno &&
-       test "x$with_rc4" = xno],
+       test "x$with_rc4" = xno &&
+       test "x$with_ascon128" = xno],
        [AC_DEFINE([SQLITE_HAS_CODEC], [0], [All ciphers disabled so encryption is disabled])])
 
 dnl Check for zlib
@@ -154,6 +151,36 @@ AS_CASE([$host_cpu],
 AM_CONDITIONAL([HOST_X86], [test x$hostX86 = xtrue])
 AM_CONDITIONAL([HOST_ARM], [test x$hostARM = xtrue])
 AM_CONDITIONAL([HAVE_ZLIB], [test x$haveZLib = xtrue])
+
+dnl Detect the target system
+
+build_linux=no
+build_windows=no
+build_mac=no
+
+case "${host_os}" in
+    linux*)
+        build_linux=yes
+        ;;
+    cygwin*|mingw*)
+        build_windows=yes
+        ;;
+    darwin*)
+        build_mac=yes
+        ;;
+    *)
+        AC_MSG_ERROR(["OS $host_os is not supported"])
+        ;;
+esac
+
+if [test "$build_windows" = "yes"]; then
+    AC_CHECK_TOOL([WINDRES], [windres], no)
+fi
+
+dnl Pass the conditionals to automake
+AM_CONDITIONAL([HOST_LINUX], [test "$build_linux" = "yes"])
+AM_CONDITIONAL([HOST_WINDOWS], [test "$build_windows" = "yes"])
+AM_CONDITIONAL([HOST_OSX], [test "$build_mac" = "yes"])
 
 AC_SUBST(SQLITE3MC_LIBNAME, "sqlite3mc")
 AC_SUBST( LIBDIR, "lib" )

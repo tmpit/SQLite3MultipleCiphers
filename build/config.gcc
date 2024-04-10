@@ -23,4 +23,8 @@ SQLITE_ENABLE_DEBUG ?= 0
 # Set to 1 to use MINIZ
 SQLITE3MC_USE_MINIZ ?= 0
 
+# Add PRAGMA memory_security (Default: 0)
+# Set to 1 to enable the PRAGMA
+SQLITE3MC_SECURE_MEMORY ?= 0
+
 ### Configuration dependent settings

@@ -3,7 +3,7 @@
 ** Purpose:     Header file for SQLite3 Multiple Ciphers compile-time configuration
 ** Author:      Ulrich Telle
 ** Created:     2021-09-27
-** Copyright:   (c) 2019-2021 Ulrich Telle
+** Copyright:   (c) 2019-2023 Ulrich Telle
 ** License:     MIT
 */
 
@@ -37,6 +37,10 @@
 #define HAVE_CIPHER_RC4 WXSQLITE3_HAVE_CIPHER_RC4
 #endif
 
+#ifdef WXSQLITE3_HAVE_CIPHER_ASCON128
+#define HAVE_CIPHER_ASCON128 WXSQLITE3_HAVE_CIPHER_ASCON128
+#endif
+
 /*
 ** Actual definitions of supported ciphers
 */
@@ -60,6 +64,33 @@
 #define HAVE_CIPHER_RC4 1
 #endif
 
+#ifndef HAVE_CIPHER_ASCON128
+#define HAVE_CIPHER_ASCON128 1
+#endif
+
+/*
+** Disable all built-in ciphers on request
+*/
+
+#if 0
+#define SQLITE3MC_OMIT_BUILTIN_CIPHERS
+#endif
+
+#ifdef SQLITE3MC_OMIT_BUILTIN_CIPHERS
+#undef HAVE_CIPHER_AES_128_CBC
+#undef HAVE_CIPHER_AES_256_CBC
+#undef HAVE_CIPHER_CHACHA20
+#undef HAVE_CIPHER_SQLCIPHER
+#undef HAVE_CIPHER_RC4
+#undef HAVE_CIPHER_ASCON128
+#define HAVE_CIPHER_AES_128_CBC 0
+#define HAVE_CIPHER_AES_256_CBC 0
+#define HAVE_CIPHER_CHACHA20    0
+#define HAVE_CIPHER_SQLCIPHER   0
+#define HAVE_CIPHER_RC4         0
+#define HAVE_CIPHER_ASCON128    0
+#endif
+
 /*
 ** Check that at least one cipher is be supported
 */
@@ -67,8 +98,9 @@
     HAVE_CIPHER_AES_256_CBC == 0 &&  \
     HAVE_CIPHER_CHACHA20    == 0 &&  \
     HAVE_CIPHER_SQLCIPHER   == 0 &&  \
-    HAVE_CIPHER_RC4         == 0
-#error Enable at least one cipher scheme!
+    HAVE_CIPHER_RC4         == 0 &&  \
+    HAVE_CIPHER_ASCON128    == 0
+#pragma message ("sqlite3mc_config.h: WARNING - No built-in cipher scheme enabled!")
 #endif
 
 /*

@@ -7,6 +7,7 @@
 ** but subtly different.  VSV supports a number of extensions to the
 ** CSV format as well as more processing options.
 **
+** http:\\www.dessus.com\files\vsv.c
 **
 ** Usage:
 **
@@ -65,9 +66,10 @@
 **
 ** STRING means a quoted string.  The quote character may be either
 ** a single quote or a double quote.  Two quote characters in a row
-** will be replaced with a single quote character.  STRINGS do not
+** will be replaced with one quote character.  STRINGS do not
 ** need to be quoted if it is obvious where they begin and end
-** (that is, they do not contain a comma).  Leading and trailing
+** (that is, they do not contain a comma or other character that the
+** parser treats especially, such as : or \).  Leading and trailing
 ** spaces will be trimmed from unquoted strings.
 **
 **    filename =./this/filename.here, ...
@@ -111,7 +113,7 @@
 ** The nulls option will cause fields that do not contain anything
 ** to return NULL rather than an empty result.  Two separators
 ** side-by-each with no intervening characters at all will be
-** returned as NULL if nulls is true and if nulls is false or
+** returned as NULL if nulls is true; if nulls is false or
 ** the contents are explicity empty ("") then a 0 length blob
 ** (if affinity=blob) or 0 length text string.
 **
@@ -166,13 +168,13 @@
 **                      (b) your platform/compiler does not
 **                      support long double (treats it as a double)
 **                      then a 64-bit integer will only be returned
-**                      if the value would fit in a 6-byte varint,
-**                      otherwise a double will be returned
+**                      for integers that can be represented in the
+**                      53 bit significand of a double
 **
 ** The nulls option will cause fields that do not contain anything
 ** to return NULL rather than an empty result.  Two separators
 ** side-by-each with no intervening characters at all will be
-** returned as NULL if nulls is true and if nulls is false or
+** returned as NULL if nulls is true; if nulls is false or
 ** the contents are explicity empty ("") then a 0 length blob
 ** (if affinity=blob) or 0 length text string will be returned.
 **
@@ -225,6 +227,7 @@ SQLITE_EXTENSION_INIT1
 #include <ctype.h>
 #include <stdio.h>
 #include <math.h>
+#include <limits.h>
 
 #ifdef SQLITE_HAVE_ZLIB
 #include <zlib.h>
@@ -233,6 +236,19 @@ SQLITE_EXTENSION_INIT1
 #define fread  gzfread
 #define fseek  gzseek
 #define ftell  gztell
+#endif
+
+#undef LONGDOUBLE_CONSTANT
+#undef LONGDOUBLE_TYPE
+#if defined(SQLITE_USE_QUADMATH) && defined(__GNUC__) && defined(_WIN64)
+#include <quadmath.h>
+#define LONGDOUBLE_TYPE __float128
+#define LONGDOUBLE_CONSTANT(x) x##Q
+#define modfl modfq
+#define strtold strtoflt128
+#else
+#define LONGDOUBLE_TYPE long double
+#define LONGDOUBLE_CONSTANT(x) x##L
 #endif
 
 #ifndef SQLITE_OMIT_VIRTUALTABLE
@@ -562,6 +578,7 @@ static char *vsv_read_one_field(VsvReader *p)
         }
         p->cTerm = (char)c;
     }
+    assert( p->z==0 || p->n<p->nAlloc );
     if (p->z)
     {
         p->z[p->n] = 0;
@@ -1563,6 +1580,36 @@ static long long vsv_utf8IsValid(char *string)
             length++;
             continue;
         }
+#if 0   // UTF-8 does not encode sequences longer than 4 bytes (yet)
+        if ((c & 0xFC) == 0xF8)
+        {
+            trailing = 4;
+            start++;
+            length++;
+            continue;
+        }
+        if ((c & 0xFE) == 0xFC)
+        {
+            trailing = 5;
+            start++;
+            length++;
+            continue;
+        }
+        if ((c & 0xFF) == 0xFE)
+        {
+            trailing = 6;
+            start++;
+            length++;
+            continue;
+        }
+        if ((c & 0xFF) == 0xFF)
+        {
+            trailing = 7;
+            start++;
+            length++;
+            continue;
+        }
+#endif
         length = -1;
         break;
     }
@@ -1583,6 +1630,7 @@ static int vsvtabColumn(
     VsvTable *pTab = (VsvTable*)cur->pVtab;
     long long dLen = pCur->dLen[i];
     long long length = 0;
+    static int hasExtended = 0;
 
     if (i>=0 && i<pTab->nCol && pCur->azVal[i]!=0 && dLen>-1)
     {
@@ -1704,36 +1752,58 @@ static int vsvtabColumn(
                 {
                     case 1:
                     {
-                        sqlite3_result_int64(ctx, strtoll(pCur->azVal[i], 0, 10));
-                        break;
+                        sqlite_int64 ival;
+
+                        ival = strtoll(pCur->azVal[i], 0, 10);
+                        if (ival > LLONG_MIN && ival < LLONG_MAX) {
+                            sqlite3_result_int64(ctx, ival);
+                            break;
+                        }
+
                     }
                     case 2:
                     {
-                        long double dv, fp, ip;
+                        LONGDOUBLE_TYPE dv, fp, ip;
+
+#if defined(SQLITE_USE_QUADMATH) && defined(__GNUC__) && defined(_WIN64)
+                        if (!hasExtended) hasExtended = 1;
+#else
+                        if (!hasExtended) {
+                            if (sizeof(long double) > sizeof(double)) {
+                                volatile unsigned long long i = ULLONG_MAX;
+                                volatile long double l;
+                                volatile double d;
+                                l = i;
+                                d = i;
+                                hasExtended = (d == l) ? -1 : 1;
+                            } else {
+                                hasExtended = -1;
+                            }
+                        }
+#endif
 
                         dv = strtold(pCur->azVal[i], 0);
                         fp = modfl(dv, &ip);
-                        if (sizeof(long double)>sizeof(double))
+                        if (hasExtended<0)
                         {
-                            if (fp==0.0L && dv >= -9223372036854775808.0L && dv <= 9223372036854775807.0L)
+                            if (fp==0.0L && ip >= -9007199254740991LL && dv <= 9007199254740991LL)
                             {
-                                sqlite3_result_int64(ctx, (long long)dv);
+                                sqlite3_result_int64(ctx, (long long)ip);
                             }
                             else
                             {
-                                sqlite3_result_double(ctx, (double)dv);
+                                sqlite3_result_double(ctx, dv);
                             }
                         }
                         else
                         {
-                            // Only convert if it will fit in a 6-byte varint
-                            if (fp==0.0L && dv >= -140737488355328.0L && dv <= 140737488355328.0L)
+                            if (fp==0.0L && ip >= LLONG_MIN && ip <= LLONG_MAX)
                             {
-                                sqlite3_result_int64(ctx, (long long)dv);
+                                sqlite3_result_int64(ctx, (long long)ip);
                             }
                             else
                             {
-                                sqlite3_result_double(ctx, (double)dv);
+                                sqlite3_result_double(ctx, dv);
                             }
                         }
                         break;
@@ -1798,6 +1868,12 @@ static int vsvtabFilter(
     VsvCursor *pCur = (VsvCursor*)pVtabCursor;
     VsvTable *pTab = (VsvTable*)pVtabCursor->pVtab;
     pCur->iRowid = 0;
+
+    /* Ensure the field buffer is always allocated. Otherwise, if the
+    ** first field is zero bytes in size, this may be mistaken for an OOM
+    ** error in csvtabNext(). */
+    if( vsv_append(&pCur->rdr, 0) ) return SQLITE_NOMEM;
+
     if (pCur->rdr.in==0)
     {
         assert( pCur->rdr.zIn==pTab->zData );
@@ -1953,3 +2029,7 @@ int sqlite3_vsv_init(
     return SQLITE_OK;
 #endif
 }
+
+#undef modfl
+#undef strtold
+

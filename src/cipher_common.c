@@ -3,7 +3,7 @@
 ** Purpose:     Implementation of SQLite codecs
 ** Author:      Ulrich Telle
 ** Created:     2020-02-02
-** Copyright:   (c) 2006-2021 Ulrich Telle
+** Copyright:   (c) 2006-2022 Ulrich Telle
 ** License:     MIT
 */
 
@@ -23,21 +23,26 @@ static unsigned char padding[] =
 
 static CipherParams commonParams[] =
 {
-  { "cipher",                  CODEC_TYPE,           CODEC_TYPE, 1, CODEC_TYPE_MAX },
-  { "hmac_check",                       1,                    1, 0,              1 },
-  { "mc_legacy_wal", SQLITE3MC_LEGACY_WAL, SQLITE3MC_LEGACY_WAL, 0,              1 },
+  { "cipher",          CODEC_TYPE_UNKNOWN,   CODEC_TYPE_UNKNOWN, 1, CODEC_COUNT_MAX },
+  { "hmac_check",                       1,                    1, 0,               1 },
+  { "mc_legacy_wal", SQLITE3MC_LEGACY_WAL, SQLITE3MC_LEGACY_WAL, 0,               1 },
   CIPHER_PARAMS_SENTINEL
 };
+
+#define CIPHER_NAME_GLOBAL "global"
+
+static CodecParameter globalCommonParams   = { CIPHER_NAME_GLOBAL, CODEC_TYPE_UNKNOWN, commonParams };
+static CodecParameter globalSentinelParams = { "",                 CODEC_TYPE_UNKNOWN, NULL };
 
 SQLITE_PRIVATE int
 sqlite3mcGetCipherParameter(CipherParams* cipherParams, const char* paramName)
 {
   int value = -1;
-  for (; strlen(cipherParams->m_name) > 0; ++cipherParams)
+  for (; cipherParams->m_name[0] != 0; ++cipherParams)
   {
     if (sqlite3_stricmp(paramName, cipherParams->m_name) == 0) break;
   }
-  if (strlen(cipherParams->m_name) > 0)
+  if (cipherParams->m_name[0] != 0)
   {
     value = cipherParams->m_value;
     cipherParams->m_value = cipherParams->m_default;
@@ -45,26 +50,15 @@ sqlite3mcGetCipherParameter(CipherParams* cipherParams, const char* paramName)
   return value;
 }
 
-static CodecParameter globalCodecParameterTable[] =
+typedef struct _CipherName
 {
-  { "global",    CODEC_TYPE_UNKNOWN,   commonParams },
-#if HAVE_CIPHER_AES_128_CBC
-  { "aes128cbc", CODEC_TYPE_AES128,    mcAES128Params },
-#endif
-#if HAVE_CIPHER_AES_256_CBC
-  { "aes256cbc", CODEC_TYPE_AES256,    mcAES256Params },
-#endif
-#if HAVE_CIPHER_CHACHA20
-  { "chacha20",  CODEC_TYPE_CHACHA20,  mcChaCha20Params },
-#endif
-#if HAVE_CIPHER_SQLCIPHER
-  { "sqlcipher", CODEC_TYPE_SQLCIPHER, mcSQLCipherParams },
-#endif
-#if HAVE_CIPHER_RC4
-  { "rc4",       CODEC_TYPE_RC4,       mcRC4Params },
-#endif
-  { "",          CODEC_TYPE_UNKNOWN,   NULL }
-};
+  char m_name[CIPHER_NAME_MAXLEN];
+} CipherName;
+
+static int globalCipherCount = 0;
+static char* globalSentinelName = "";
+static CipherName globalCipherNameTable[CODEC_COUNT_LIMIT + 2] = { 0 };
+static CodecParameter globalCodecParameterTable[CODEC_COUNT_LIMIT + 2];
 
 SQLITE_PRIVATE CodecParameter*
 sqlite3mcCloneCodecParameterTable()
@@ -76,10 +70,10 @@ sqlite3mcCloneCodecParameterTable()
   CipherParams* cloneCipherParams;
   CodecParameter* cloneCodecParams;
 
-  for (j = 0; strlen(globalCodecParameterTable[j].m_name) > 0; ++j)
+  for (j = 0; globalCodecParameterTable[j].m_name[0] != 0; ++j)
   {
     CipherParams* params = globalCodecParameterTable[j].m_params;
-    for (k = 0; strlen(params[k].m_name) > 0; ++k);
+    for (k = 0; params[k].m_name[0] != 0; ++k);
     nParams += k;
   }
   nTables = j;
@@ -98,7 +92,7 @@ sqlite3mcCloneCodecParameterTable()
       cloneCodecParams[j].m_name = globalCodecParameterTable[j].m_name;
       cloneCodecParams[j].m_id = globalCodecParameterTable[j].m_id;
       cloneCodecParams[j].m_params = &cloneCipherParams[offset];
-      for (n = 0; strlen(params[n].m_name) > 0; ++n);
+      for (n = 0; params[n].m_name[0] != 0; ++n);
       /* Copy all parameters of the current table (including sentinel) */
       for (k = 0; k <= n; ++k)
       {
@@ -138,35 +132,7 @@ static const CipherDescriptor mcDummyDescriptor =
   "@dummy@", NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 };
 
-static const CipherDescriptor* codecDescriptorTable[] =
-{
-#if HAVE_CIPHER_AES_128_CBC
-  &mcAES128Descriptor,
-#else
-  &mcDummyDescriptor,
-#endif
-#if HAVE_CIPHER_AES_256_CBC
-  &mcAES256Descriptor,
-#else
-  &mcDummyDescriptor,
-#endif
-#if HAVE_CIPHER_CHACHA20
-  &mcChaCha20Descriptor,
-#else
-  &mcDummyDescriptor,
-#endif
-#if HAVE_CIPHER_SQLCIPHER
-  &mcSQLCipherDescriptor,
-#else
-  &mcDummyDescriptor,
-#endif
-#if HAVE_CIPHER_RC4
-  &mcRC4Descriptor,
-#else
-  &mcDummyDescriptor,
-#endif
-  &mcSentinelDescriptor
-};
+static CipherDescriptor globalCodecDescriptorTable[CODEC_COUNT_MAX + 1];
 
 /* --- Codec --- */
 
@@ -180,11 +146,11 @@ sqlite3mcGetCipherType(sqlite3* db)
   CipherParams* cipherParamTable = (codecParams != NULL) ? codecParams[0].m_params : commonParams;
   int cipherType = CODEC_TYPE;
   CipherParams* cipher = cipherParamTable;
-  for (; strlen(cipher->m_name) > 0; ++cipher)
+  for (; cipher->m_name[0] != 0; ++cipher)
   {
     if (sqlite3_stricmp("cipher", cipher->m_name) == 0) break;
   }
-  if (strlen(cipher->m_name) > 0)
+  if (cipher->m_name[0] != 0)
   {
     cipherType = cipher->m_value;
     cipher->m_value = cipher->m_default;
@@ -193,19 +159,20 @@ sqlite3mcGetCipherType(sqlite3* db)
 }
 
 SQLITE_PRIVATE CipherParams*
-sqlite3mcGetCipherParams(sqlite3* db, int cypherType)
+sqlite3mcGetCipherParams(sqlite3* db, const char* cipherName)
 {
   int j = 0;
+  int cipherType = sqlite3mc_cipher_index(cipherName);
   CodecParameter* codecParams = (db != NULL) ? sqlite3mcGetCodecParams(db) : globalCodecParameterTable;
   if (codecParams == NULL)
   {
     codecParams = globalCodecParameterTable;
   }
-  if (cypherType > 0)
+  if (cipherType > 0)
   {
     for (j = 1; codecParams[j].m_id > 0; ++j)
     {
-      if (cypherType == codecParams[j].m_id) break;
+      if (cipherType == codecParams[j].m_id) break;
     }
   }
   CipherParams* cipherParamTable = codecParams[j].m_params;
@@ -255,12 +222,12 @@ sqlite3mcCodecTerm(Codec* codec)
 {
   if (codec->m_readCipher != NULL)
   {
-    codecDescriptorTable[codec->m_readCipherType - 1]->m_freeCipher(codec->m_readCipher);
+    globalCodecDescriptorTable[codec->m_readCipherType - 1].m_freeCipher(codec->m_readCipher);
     codec->m_readCipher = NULL;
   }
   if (codec->m_writeCipher != NULL)
   {
-    codecDescriptorTable[codec->m_writeCipherType - 1]->m_freeCipher(codec->m_writeCipher);
+    globalCodecDescriptorTable[codec->m_writeCipherType - 1].m_freeCipher(codec->m_writeCipher);
     codec->m_writeCipher = NULL;
   }
   memset(codec, 0, sizeof(Codec));
@@ -277,14 +244,14 @@ SQLITE_PRIVATE int
 sqlite3mcCodecSetup(Codec* codec, int cipherType, char* userPassword, int passwordLength)
 {
   int rc = SQLITE_OK;
-  CipherParams* globalParams = sqlite3mcGetCipherParams(codec->m_db, 0);
+  CipherParams* globalParams = sqlite3mcGetCipherParams(codec->m_db, CIPHER_NAME_GLOBAL);
   codec->m_isEncrypted = 1;
   codec->m_hmacCheck = sqlite3mcGetCipherParameter(globalParams, "hmac_check");
   codec->m_walLegacy = sqlite3mcGetCipherParameter(globalParams, "mc_legacy_wal");
   codec->m_hasReadCipher = 1;
   codec->m_hasWriteCipher = 1;
   codec->m_readCipherType = cipherType;
-  codec->m_readCipher = codecDescriptorTable[codec->m_readCipherType-1]->m_allocateCipher(codec->m_db);
+  codec->m_readCipher = globalCodecDescriptorTable[codec->m_readCipherType-1].m_allocateCipher(codec->m_db);
   if (codec->m_readCipher != NULL)
   {
     unsigned char* keySalt = (codec->m_hasKeySalt != 0) ? codec->m_keySalt : NULL;
@@ -302,17 +269,17 @@ SQLITE_PRIVATE int
 sqlite3mcSetupWriteCipher(Codec* codec, int cipherType, char* userPassword, int passwordLength)
 {
   int rc = SQLITE_OK;
-  CipherParams* globalParams = sqlite3mcGetCipherParams(codec->m_db, 0);
+  CipherParams* globalParams = sqlite3mcGetCipherParams(codec->m_db, CIPHER_NAME_GLOBAL);
   if (codec->m_writeCipher != NULL)
   {
-    codecDescriptorTable[codec->m_writeCipherType-1]->m_freeCipher(codec->m_writeCipher);
+    globalCodecDescriptorTable[codec->m_writeCipherType-1].m_freeCipher(codec->m_writeCipher);
   }
   codec->m_isEncrypted = 1;
   codec->m_hmacCheck = sqlite3mcGetCipherParameter(globalParams, "hmac_check");
   codec->m_walLegacy = sqlite3mcGetCipherParameter(globalParams, "mc_legacy_wal");
   codec->m_hasWriteCipher = 1;
   codec->m_writeCipherType = cipherType;
-  codec->m_writeCipher = codecDescriptorTable[codec->m_writeCipherType-1]->m_allocateCipher(codec->m_db);
+  codec->m_writeCipher = globalCodecDescriptorTable[codec->m_writeCipherType-1].m_allocateCipher(codec->m_db);
   if (codec->m_writeCipher != NULL)
   {
     unsigned char* keySalt = (codec->m_hasKeySalt != 0) ? codec->m_keySalt : NULL;
@@ -433,57 +400,57 @@ sqlite3mcGetPageBuffer(Codec* codec)
 SQLITE_PRIVATE int
 sqlite3mcGetLegacyReadCipher(Codec* codec)
 {
-  int legacy = (codec->m_hasReadCipher  && codec->m_readCipher != NULL) ? codecDescriptorTable[codec->m_readCipherType - 1]->m_getLegacy(codec->m_readCipher) : 0;
+  int legacy = (codec->m_hasReadCipher  && codec->m_readCipher != NULL) ? globalCodecDescriptorTable[codec->m_readCipherType - 1].m_getLegacy(codec->m_readCipher) : 0;
   return legacy;
 }
 
 SQLITE_PRIVATE int
 sqlite3mcGetLegacyWriteCipher(Codec* codec)
 {
-  int legacy = (codec->m_hasWriteCipher && codec->m_writeCipher != NULL) ? codecDescriptorTable[codec->m_writeCipherType - 1]->m_getLegacy(codec->m_writeCipher) : -1;
+  int legacy = (codec->m_hasWriteCipher && codec->m_writeCipher != NULL) ? globalCodecDescriptorTable[codec->m_writeCipherType - 1].m_getLegacy(codec->m_writeCipher) : -1;
   return legacy;
 }
 
 SQLITE_PRIVATE int
 sqlite3mcGetPageSizeReadCipher(Codec* codec)
 {
-  int pageSize = (codec->m_hasReadCipher  && codec->m_readCipher != NULL) ? codecDescriptorTable[codec->m_readCipherType - 1]->m_getPageSize(codec->m_readCipher) : 0;
+  int pageSize = (codec->m_hasReadCipher  && codec->m_readCipher != NULL) ? globalCodecDescriptorTable[codec->m_readCipherType - 1].m_getPageSize(codec->m_readCipher) : 0;
   return pageSize;
 }
 
 SQLITE_PRIVATE int
 sqlite3mcGetPageSizeWriteCipher(Codec* codec)
 {
-  int pageSize = (codec->m_hasWriteCipher && codec->m_writeCipher != NULL) ? codecDescriptorTable[codec->m_writeCipherType - 1]->m_getPageSize(codec->m_writeCipher) : -1;
+  int pageSize = (codec->m_hasWriteCipher && codec->m_writeCipher != NULL) ? globalCodecDescriptorTable[codec->m_writeCipherType - 1].m_getPageSize(codec->m_writeCipher) : -1;
   return pageSize;
 }
 
 SQLITE_PRIVATE int
 sqlite3mcGetReservedReadCipher(Codec* codec)
 {
-  int reserved = (codec->m_hasReadCipher  && codec->m_readCipher != NULL) ? codecDescriptorTable[codec->m_readCipherType-1]->m_getReserved(codec->m_readCipher) : -1;
+  int reserved = (codec->m_hasReadCipher  && codec->m_readCipher != NULL) ? globalCodecDescriptorTable[codec->m_readCipherType-1].m_getReserved(codec->m_readCipher) : -1;
   return reserved;
 }
 
 SQLITE_PRIVATE int
 sqlite3mcGetReservedWriteCipher(Codec* codec)
 {
-  int reserved = (codec->m_hasWriteCipher && codec->m_writeCipher != NULL) ? codecDescriptorTable[codec->m_writeCipherType-1]->m_getReserved(codec->m_writeCipher) : -1;
+  int reserved = (codec->m_hasWriteCipher && codec->m_writeCipher != NULL) ? globalCodecDescriptorTable[codec->m_writeCipherType-1].m_getReserved(codec->m_writeCipher) : -1;
   return reserved;
 }
 
 SQLITE_PRIVATE int
 sqlite3mcReservedEqual(Codec* codec)
 {
-  int readReserved  = (codec->m_hasReadCipher  && codec->m_readCipher  != NULL) ? codecDescriptorTable[codec->m_readCipherType-1]->m_getReserved(codec->m_readCipher)   : -1;
-  int writeReserved = (codec->m_hasWriteCipher && codec->m_writeCipher != NULL) ? codecDescriptorTable[codec->m_writeCipherType-1]->m_getReserved(codec->m_writeCipher) : -1;
+  int readReserved  = (codec->m_hasReadCipher  && codec->m_readCipher  != NULL) ? globalCodecDescriptorTable[codec->m_readCipherType-1].m_getReserved(codec->m_readCipher)   : -1;
+  int writeReserved = (codec->m_hasWriteCipher && codec->m_writeCipher != NULL) ? globalCodecDescriptorTable[codec->m_writeCipherType-1].m_getReserved(codec->m_writeCipher) : -1;
   return (readReserved == writeReserved);
 }
 
 SQLITE_PRIVATE unsigned char*
 sqlite3mcGetSaltWriteCipher(Codec* codec)
 {
-  unsigned char* salt = (codec->m_hasWriteCipher && codec->m_writeCipher != NULL) ? codecDescriptorTable[codec->m_writeCipherType - 1]->m_getSalt(codec->m_writeCipher) : NULL;
+  unsigned char* salt = (codec->m_hasWriteCipher && codec->m_writeCipher != NULL) ? globalCodecDescriptorTable[codec->m_writeCipherType - 1].m_getSalt(codec->m_writeCipher) : NULL;
   return salt;
 }
 
@@ -505,10 +472,10 @@ sqlite3mcCodecCopy(Codec* codec, Codec* other)
 
   if (codec->m_hasReadCipher)
   {
-    codec->m_readCipher = codecDescriptorTable[codec->m_readCipherType - 1]->m_allocateCipher(codec->m_db);
+    codec->m_readCipher = globalCodecDescriptorTable[codec->m_readCipherType - 1].m_allocateCipher(codec->m_db);
     if (codec->m_readCipher != NULL)
     {
-      codecDescriptorTable[codec->m_readCipherType - 1]->m_cloneCipher(codec->m_readCipher, other->m_readCipher);
+      globalCodecDescriptorTable[codec->m_readCipherType - 1].m_cloneCipher(codec->m_readCipher, other->m_readCipher);
     }
     else
     {
@@ -518,10 +485,10 @@ sqlite3mcCodecCopy(Codec* codec, Codec* other)
 
   if (codec->m_hasWriteCipher)
   {
-    codec->m_writeCipher = codecDescriptorTable[codec->m_writeCipherType - 1]->m_allocateCipher(codec->m_db);
+    codec->m_writeCipher = globalCodecDescriptorTable[codec->m_writeCipherType - 1].m_allocateCipher(codec->m_db);
     if (codec->m_writeCipher != NULL)
     {
-      codecDescriptorTable[codec->m_writeCipherType - 1]->m_cloneCipher(codec->m_writeCipher, other->m_writeCipher);
+      globalCodecDescriptorTable[codec->m_writeCipherType - 1].m_cloneCipher(codec->m_writeCipher, other->m_writeCipher);
     }
     else
     {
@@ -544,17 +511,17 @@ sqlite3mcCopyCipher(Codec* codec, int read2write)
   {
     if (codec->m_writeCipher != NULL && codec->m_writeCipherType != codec->m_readCipherType)
     {
-      codecDescriptorTable[codec->m_writeCipherType-1]->m_freeCipher(codec->m_writeCipher);
+      globalCodecDescriptorTable[codec->m_writeCipherType-1].m_freeCipher(codec->m_writeCipher);
       codec->m_writeCipher = NULL;
     }
     if (codec->m_writeCipher == NULL)
     {
       codec->m_writeCipherType = codec->m_readCipherType;
-      codec->m_writeCipher = codecDescriptorTable[codec->m_writeCipherType-1]->m_allocateCipher(codec->m_db);
+      codec->m_writeCipher = globalCodecDescriptorTable[codec->m_writeCipherType-1].m_allocateCipher(codec->m_db);
     }
     if (codec->m_writeCipher != NULL)
     {
-      codecDescriptorTable[codec->m_writeCipherType-1]->m_cloneCipher(codec->m_writeCipher, codec->m_readCipher);
+      globalCodecDescriptorTable[codec->m_writeCipherType-1].m_cloneCipher(codec->m_writeCipher, codec->m_readCipher);
     }
     else
     {
@@ -565,17 +532,17 @@ sqlite3mcCopyCipher(Codec* codec, int read2write)
   {
     if (codec->m_readCipher != NULL && codec->m_readCipherType != codec->m_writeCipherType)
     {
-      codecDescriptorTable[codec->m_readCipherType-1]->m_freeCipher(codec->m_readCipher);
+      globalCodecDescriptorTable[codec->m_readCipherType-1].m_freeCipher(codec->m_readCipher);
       codec->m_readCipher = NULL;
     }
     if (codec->m_readCipher == NULL)
     {
       codec->m_readCipherType = codec->m_writeCipherType;
-      codec->m_readCipher = codecDescriptorTable[codec->m_readCipherType-1]->m_allocateCipher(codec->m_db);
+      codec->m_readCipher = globalCodecDescriptorTable[codec->m_readCipherType-1].m_allocateCipher(codec->m_db);
     }
     if (codec->m_readCipher != NULL)
     {
-      codecDescriptorTable[codec->m_readCipherType-1]->m_cloneCipher(codec->m_readCipher, codec->m_writeCipher);
+      globalCodecDescriptorTable[codec->m_readCipherType-1].m_cloneCipher(codec->m_readCipher, codec->m_writeCipher);
     }
     else
     {
@@ -606,13 +573,13 @@ sqlite3mcPadPassword(char* password, int pswdlen, unsigned char pswd[32])
 SQLITE_PRIVATE void
 sqlite3mcGenerateReadKey(Codec* codec, char* userPassword, int passwordLength, unsigned char* cipherSalt)
 {
-  codecDescriptorTable[codec->m_readCipherType-1]->m_generateKey(codec->m_readCipher, codec->m_btShared, userPassword, passwordLength, 0, cipherSalt);
+  globalCodecDescriptorTable[codec->m_readCipherType-1].m_generateKey(codec->m_readCipher, codec->m_btShared, userPassword, passwordLength, 0, cipherSalt);
 }
 
 SQLITE_PRIVATE void
 sqlite3mcGenerateWriteKey(Codec* codec, char* userPassword, int passwordLength, unsigned char* cipherSalt)
 {
-  codecDescriptorTable[codec->m_writeCipherType-1]->m_generateKey(codec->m_writeCipher, codec->m_btShared, userPassword, passwordLength, 1, cipherSalt);
+  globalCodecDescriptorTable[codec->m_writeCipherType-1].m_generateKey(codec->m_writeCipher, codec->m_btShared, userPassword, passwordLength, 1, cipherSalt);
 }
 
 SQLITE_PRIVATE int
@@ -622,7 +589,7 @@ sqlite3mcEncrypt(Codec* codec, int page, unsigned char* data, int len, int useWr
   void* cipher = (useWriteKey) ? codec->m_writeCipher : codec->m_readCipher;
   int reserved = (useWriteKey) ? (codec->m_writeReserved >= 0) ? codec->m_writeReserved : codec->m_reserved
                                : (codec->m_readReserved >= 0) ? codec->m_readReserved : codec->m_reserved;
-  return codecDescriptorTable[cipherType-1]->m_encryptPage(cipher, page, data, len, reserved);
+  return globalCodecDescriptorTable[cipherType-1].m_encryptPage(cipher, page, data, len, reserved);
 }
 
 SQLITE_PRIVATE int
@@ -631,7 +598,7 @@ sqlite3mcDecrypt(Codec* codec, int page, unsigned char* data, int len)
   int cipherType = codec->m_readCipherType;
   void* cipher = codec->m_readCipher;
   int reserved = (codec->m_readReserved >= 0) ? codec->m_readReserved : codec->m_reserved;
-  return codecDescriptorTable[cipherType-1]->m_decryptPage(cipher, page, data, len, reserved, codec->m_hmacCheck);
+  return globalCodecDescriptorTable[cipherType-1].m_decryptPage(cipher, page, data, len, reserved, codec->m_hmacCheck);
 }
 
 #if HAVE_CIPHER_SQLCIPHER

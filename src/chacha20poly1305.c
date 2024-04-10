@@ -52,7 +52,8 @@
 static void chacha20_block(uint32_t x[16])
 {
   int i;
-  #define QR(x, a, b, c, d)                           \
+  /* Macro renamed from QR to CC20QR to avoid name clashes. */
+  #define CC20QR(x, a, b, c, d)                           \
   x[a] += x[b]; x[d] ^= x[a]; x[d] = ROL32(x[d], 16); \
   x[c] += x[d]; x[b] ^= x[c]; x[b] = ROL32(x[b], 12); \
   x[a] += x[b]; x[d] ^= x[a]; x[d] = ROL32(x[d],  8); \
@@ -60,17 +61,17 @@ static void chacha20_block(uint32_t x[16])
   for (i = 0; i < 10; i++)
   {
     /* Column round */
-    QR(x, 0, 4, 8, 12)
-    QR(x, 1, 5, 9, 13)
-    QR(x, 2, 6, 10, 14)
-    QR(x, 3, 7, 11, 15)
+    CC20QR(x, 0, 4, 8, 12)
+    CC20QR(x, 1, 5, 9, 13)
+    CC20QR(x, 2, 6, 10, 14)
+    CC20QR(x, 3, 7, 11, 15)
     /* Diagonal round */
-    QR(x, 0, 5, 10, 15)
-    QR(x, 1, 6, 11, 12)
-    QR(x, 2, 7, 8, 13)
-    QR(x, 3, 4, 9, 14)
+    CC20QR(x, 0, 5, 10, 15)
+    CC20QR(x, 1, 6, 11, 12)
+    CC20QR(x, 2, 7, 8, 13)
+    CC20QR(x, 3, 4, 9, 14)
   }
-  #undef QR
+  #undef CC20QR
 }
 
 void chacha20_xor(void* buffer, size_t n, const uint8_t key[32],
@@ -234,7 +235,16 @@ int poly1305_tagcmp(const uint8_t tag1[16], const uint8_t tag2[16])
 /*
  * Platform-specific entropy functions for seeding RNG
  */
-#if defined(_WIN32) || defined(__CYGWIN__)
+#if defined(__WASM__)
+
+extern int getentropy(void* buf, size_t n);
+
+static size_t entropy(void* buf, size_t n)
+{
+  return (getentropy(buf, n) == 0) ? n : 0;
+}
+
+#elif defined(_WIN32) || defined(__CYGWIN__)
 
 #if SQLITE3MC_USE_RAND_S
 
@@ -369,14 +379,14 @@ fail:
   return 0;
 }
 
-#if defined(__APPLE__) && defined(__MAC_10_12)
-#include <sys/random.h>
+#if defined(__APPLE__)
+#include <Security/SecRandom.h>
 #endif
 
 static size_t entropy(void* buf, size_t n)
 {
-#if defined(__APPLE__) && defined(__MAC_10_12) && __MAC_OS_X_VERSION_MAX_ALLOWED >= __MAC_10_12
-  if (getentropy(buf, n) == 0)
+#if defined(__APPLE__)
+  if (SecRandomCopyBytes(kSecRandomDefault, n, (uint8_t*) buf) == 0)
     return n;
 #elif defined(__linux__) && defined(SYS_getrandom)
   if (syscall(SYS_getrandom, buf, n, 0) == n)
@@ -387,6 +397,7 @@ static size_t entropy(void* buf, size_t n)
 #endif
   return read_urandom(buf, n);
 }
+
 #else
 # error "Secure pseudorandom number generator not implemented for this OS"
 #endif

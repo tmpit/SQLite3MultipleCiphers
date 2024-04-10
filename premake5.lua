@@ -74,6 +74,8 @@ project "sqlite3mc_lib"
     "SQLITE_ENABLE_FTS5=1",
     "SQLITE_ENABLE_RTREE=1",
     "SQLITE_ENABLE_GEOPOLY=1",
+    "SQLITE_ENABLE_PREUPDATE_HOOK=1",
+    "SQLITE_ENABLE_SESSION=1",
     "SQLITE_CORE=1",
     "SQLITE_ENABLE_EXTFUNC=1",
     "SQLITE_ENABLE_MATH_FUNCTIONS=1",
@@ -89,9 +91,10 @@ project "sqlite3mc_lib"
 --    "SQLITE_ENABLE_COMPRESS=1"
 --    "SQLITE_ENABLE_SQLAR=1"
 --    "SQLITE_ENABLE_ZIPFILE=1"
+    "SQLITE3MC_SECURE_MEMORY=$(SQLITE3MC_SECURE_MEMORY)",
     "SQLITE_TEMP_STORE=2",
     "SQLITE_USE_URI=1",
-    "SQLITE_USER_AUTHENTICATION=1",
+    "SQLITE_USER_AUTHENTICATION=0",
 -- Compatibility with official SQLite3 shell
     "SQLITE_ENABLE_DBPAGE_VTAB=1",
     "SQLITE_ENABLE_DBSTAT_VTAB=1",
@@ -134,13 +137,10 @@ project "sqlite3mc_dll"
     toolset("gcc")
     buildoptions { "-msse4.2", "-maes" }
 --    buildoptions { "-march=native" }
-    defines {
-      "SQLITE_API=__declspec(dllexport)"
-    }
   end
   makesettings { "include config.gcc" }
 
-  files { "src/sqlite3mc.c", "src/*.h", "src/sqlite3mc.def", "src/sqlite3mc.rc" }
+  files { "src/sqlite3mc.c", "src/*.h", "src/sqlite3mc.rc" }
   filter {}
   vpaths {
     ["Header Files"] = { "**.h" },
@@ -155,6 +155,7 @@ project "sqlite3mc_dll"
 
   defines {
     "_USRDLL",
+    "SQLITE_API=__declspec(dllexport)",
     "CODEC_TYPE=$(CODEC_TYPE)",
     "SQLITE_ENABLE_DEBUG=$(SQLITE_ENABLE_DEBUG)",
     "SQLITE_THREADSAFE=1",
@@ -170,6 +171,8 @@ project "sqlite3mc_dll"
     "SQLITE_ENABLE_FTS5=1",
     "SQLITE_ENABLE_RTREE=1",
     "SQLITE_ENABLE_GEOPOLY=1",
+    "SQLITE_ENABLE_PREUPDATE_HOOK=1",
+    "SQLITE_ENABLE_SESSION=1",
     "SQLITE_CORE=1",
     "SQLITE_ENABLE_EXTFUNC=1",
     "SQLITE_ENABLE_MATH_FUNCTIONS=1",
@@ -185,9 +188,10 @@ project "sqlite3mc_dll"
 --    "SQLITE_ENABLE_COMPRESS=1"
 --    "SQLITE_ENABLE_SQLAR=1"
 --    "SQLITE_ENABLE_ZIPFILE=1"
+    "SQLITE3MC_SECURE_MEMORY=$(SQLITE3MC_SECURE_MEMORY)",
     "SQLITE_TEMP_STORE=2",
     "SQLITE_USE_URI=1",
-    "SQLITE_USER_AUTHENTICATION=1"
+    "SQLITE_USER_AUTHENTICATION=0"
   }
 
   -- Intermediate directory
@@ -243,7 +247,9 @@ project "sqlite3mc_shell"
   defines {
     "SQLITE3MC_USE_MINIZ=$(SQLITE3MC_USE_MINIZ)",
     "SQLITE_SHELL_IS_UTF8=1",
-    "SQLITE_USER_AUTHENTICATION=1"
+    "SQLITE_ENABLE_SESSION=1",
+    "SQLITE_ENABLE_DBPAGE_VTAB=1",
+    "SQLITE_USER_AUTHENTICATION=0"
   }
 
   -- Intermediate directory
@@ -316,6 +322,8 @@ project "sqlite3mc_libicu"
     "SQLITE_ENABLE_FTS5=1",
     "SQLITE_ENABLE_RTREE=1",
     "SQLITE_ENABLE_GEOPOLY=1",
+    "SQLITE_ENABLE_PREUPDATE_HOOK=1",
+    "SQLITE_ENABLE_SESSION=1",
     "SQLITE_CORE=1",
     "SQLITE_ENABLE_EXTFUNC=1",
     "SQLITE_ENABLE_MATH_FUNCTIONS=1",
@@ -331,9 +339,10 @@ project "sqlite3mc_libicu"
 --    "SQLITE_ENABLE_COMPRESS=1"
 --    "SQLITE_ENABLE_SQLAR=1"
 --    "SQLITE_ENABLE_ZIPFILE=1"
+    "SQLITE3MC_SECURE_MEMORY=$(SQLITE3MC_SECURE_MEMORY)",
     "SQLITE_TEMP_STORE=2",
     "SQLITE_USE_URI=1",
-    "SQLITE_USER_AUTHENTICATION=1",
+    "SQLITE_USER_AUTHENTICATION=0",
 -- Compatibility with official SQLite3 shell
     "SQLITE_ENABLE_DBPAGE_VTAB=1",
     "SQLITE_ENABLE_DBSTAT_VTAB=1",
@@ -376,13 +385,10 @@ project "sqlite3mc_dllicu"
     toolset("gcc")
     buildoptions { "-msse4.2", "-maes" }
 --    buildoptions { "-march=native" }
-    defines {
-      "SQLITE_API=__declspec(dllexport)"
-    }
   end
   makesettings { "include config.gcc" }
 
-  files { "src/sqlite3mc.c", "src/*.h", "src/sqlite3mc.def", "src/sqlite3mc.rc" }
+  files { "src/sqlite3mc.c", "src/*.h", "src/sqlite3mc.rc" }
   filter {}
   vpaths {
     ["Header Files"] = { "**.h" },
@@ -409,6 +415,7 @@ project "sqlite3mc_dllicu"
 
   defines {
     "_USRDLL",
+    "SQLITE_API=__declspec(dllexport)",
     "CODEC_TYPE=$(CODEC_TYPE)",
     "SQLITE_ENABLE_DEBUG=$(SQLITE_ENABLE_DEBUG)",
     "SQLITE_THREADSAFE=1",
@@ -425,6 +432,8 @@ project "sqlite3mc_dllicu"
     "SQLITE_ENABLE_FTS5=1",
     "SQLITE_ENABLE_RTREE=1",
     "SQLITE_ENABLE_GEOPOLY=1",
+    "SQLITE_ENABLE_PREUPDATE_HOOK=1",
+    "SQLITE_ENABLE_SESSION=1",
     "SQLITE_CORE=1",
     "SQLITE_ENABLE_EXTFUNC=1",
     "SQLITE_ENABLE_MATH_FUNCTIONS=1",
@@ -440,9 +449,10 @@ project "sqlite3mc_dllicu"
 --    "SQLITE_ENABLE_COMPRESS=1"
 --    "SQLITE_ENABLE_SQLAR=1"
 --    "SQLITE_ENABLE_ZIPFILE=1"
+    "SQLITE3MC_SECURE_MEMORY=$(SQLITE3MC_SECURE_MEMORY)",
     "SQLITE_TEMP_STORE=2",
     "SQLITE_USE_URI=1",
-    "SQLITE_USER_AUTHENTICATION=1"
+    "SQLITE_USER_AUTHENTICATION=0"
   }
 
   -- Intermediate directory
@@ -510,7 +520,9 @@ project "sqlite3mc_shellicu"
   defines {
     "SQLITE3MC_USE_MINIZ=$(SQLITE3MC_USE_MINIZ)",
     "SQLITE_SHELL_IS_UTF8=1",
-    "SQLITE_USER_AUTHENTICATION=1"
+    "SQLITE_ENABLE_SESSION=1",
+    "SQLITE_ENABLE_DBPAGE_VTAB=1",
+    "SQLITE_USER_AUTHENTICATION=0"
   }
 
   -- Intermediate directory

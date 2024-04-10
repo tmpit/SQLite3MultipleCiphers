@@ -3,7 +3,7 @@
 ** Purpose:     Implementation of SQLite VFS for Multiple Ciphers
 ** Author:      Ulrich Telle
 ** Created:     2020-02-28
-** Copyright:   (c) 2020-2022 Ulrich Telle
+** Copyright:   (c) 2020-2023 Ulrich Telle
 ** License:     MIT
 */
 
@@ -107,7 +107,57 @@ static const int walFileHeaderSize = 32;
 /*
 ** Global I/O method structure of SQLite3 Multiple Ciphers VFS
 */
-static sqlite3_io_methods mcIoMethodsGlobal =
+
+#define IOMETHODS_VERSION_MIN 1
+#define IOMETHODS_VERSION_MAX 3
+
+static sqlite3_io_methods mcIoMethodsGlobal1 =
+{
+  1,                          /* iVersion */
+  mcIoClose,                  /* xClose */
+  mcIoRead,                   /* xRead */
+  mcIoWrite,                  /* xWrite */
+  mcIoTruncate,               /* xTruncate */
+  mcIoSync,                   /* xSync */
+  mcIoFileSize,               /* xFileSize */
+  mcIoLock,                   /* xLock */
+  mcIoUnlock,                 /* xUnlock */
+  mcIoCheckReservedLock,      /* xCheckReservedLock */
+  mcIoFileControl,            /* xFileControl */
+  mcIoSectorSize,             /* xSectorSize */
+  mcIoDeviceCharacteristics,  /* xDeviceCharacteristics */
+  0,                          /* xShmMap */
+  0,                          /* xShmLock */
+  0,                          /* xShmBarrier */
+  0,                          /* xShmUnmap */
+  0,                          /* xFetch */
+  0,                          /* xUnfetch */
+};
+
+static sqlite3_io_methods mcIoMethodsGlobal2 =
+{
+  2,                          /* iVersion */
+  mcIoClose,                  /* xClose */
+  mcIoRead,                   /* xRead */
+  mcIoWrite,                  /* xWrite */
+  mcIoTruncate,               /* xTruncate */
+  mcIoSync,                   /* xSync */
+  mcIoFileSize,               /* xFileSize */
+  mcIoLock,                   /* xLock */
+  mcIoUnlock,                 /* xUnlock */
+  mcIoCheckReservedLock,      /* xCheckReservedLock */
+  mcIoFileControl,            /* xFileControl */
+  mcIoSectorSize,             /* xSectorSize */
+  mcIoDeviceCharacteristics,  /* xDeviceCharacteristics */
+  mcIoShmMap,                 /* xShmMap */
+  mcIoShmLock,                /* xShmLock */
+  mcIoShmBarrier,             /* xShmBarrier */
+  mcIoShmUnmap,               /* xShmUnmap */
+  0,                          /* xFetch */
+  0,                          /* xUnfetch */
+};
+
+static sqlite3_io_methods mcIoMethodsGlobal3 =
 {
   3,                          /* iVersion */
   mcIoClose,                  /* xClose */
@@ -129,6 +179,9 @@ static sqlite3_io_methods mcIoMethodsGlobal =
   mcIoFetch,                  /* xFetch */
   mcIoUnfetch,                /* xUnfetch */
 };
+
+static sqlite3_io_methods* mcIoMethodsGlobal[] =
+  { 0, &mcIoMethodsGlobal1 , &mcIoMethodsGlobal2 , &mcIoMethodsGlobal3 };
 
 /*
 ** Internal functions
@@ -304,7 +357,9 @@ SQLITE_PRIVATE void* sqlite3mcPagerCodec(PgHdrMC* pPg)
 {
   sqlite3_file* pFile = sqlite3PagerFile(pPg->pPager);
   void* aData = 0;
-  if (pFile->pMethods == &mcIoMethodsGlobal)
+  if (pFile->pMethods == &mcIoMethodsGlobal1 || 
+      pFile->pMethods == &mcIoMethodsGlobal2 || 
+      pFile->pMethods == &mcIoMethodsGlobal3)
   {
     sqlite3mc_file* mcFile = (sqlite3mc_file*) pFile;
     Codec* codec = mcFile->codec;
@@ -406,9 +461,18 @@ static int mcVfsOpen(sqlite3_vfs* pVfs, const char* zName, sqlite3_file* pFile, 
   if (rc == SQLITE_OK)
   {
     /*
-    ** Real open succeeded, initialize methods, register main database files
+    ** Real open succeeded
+    ** Initialize methods (use same version number as underlying implementation
+    ** Register main database files
     */
-    pFile->pMethods = &mcIoMethodsGlobal;
+    int ioMethodsVersion = mcFile->pFile->pMethods->iVersion;
+    if (ioMethodsVersion < IOMETHODS_VERSION_MIN ||
+        ioMethodsVersion > IOMETHODS_VERSION_MAX)
+    {
+      /* If version out of range, use highest known version */
+      ioMethodsVersion = IOMETHODS_VERSION_MAX;
+    }
+    pFile->pMethods = mcIoMethodsGlobal[ioMethodsVersion];
     if (flags & SQLITE_OPEN_MAIN_DB)
     {
       mcMainListAdd(mcFile);
@@ -1194,7 +1258,10 @@ static int mcIoFileControl(sqlite3_file* pFile, int op, void* pArg)
 
 static int mcIoSectorSize(sqlite3_file* pFile)
 {
-  return REALFILE(pFile)->pMethods->xSectorSize(REALFILE(pFile));
+  if (REALFILE(pFile)->pMethods->xSectorSize)
+    return REALFILE(pFile)->pMethods->xSectorSize(REALFILE(pFile));
+  else
+    return SQLITE_DEFAULT_SECTOR_SIZE;
 }
 
 static int mcIoDeviceCharacteristics(sqlite3_file* pFile)
@@ -1230,6 +1297,74 @@ static int mcIoFetch(sqlite3_file* pFile, sqlite3_int64 iOfst, int iAmt, void** 
 static int mcIoUnfetch( sqlite3_file* pFile, sqlite3_int64 iOfst, void* p)
 {
   return REALFILE(pFile)->pMethods->xUnfetch(REALFILE(pFile), iOfst, p);
+}
+
+/*
+** SQLite3 Multiple Ciphers internal API functions
+*/
+
+/*
+** Check the requested VFS
+*/
+SQLITE_PRIVATE int
+sqlite3mcCheckVfs(const char* zVfs)
+{
+  int rc = SQLITE_OK;
+  sqlite3_vfs* pVfs = sqlite3_vfs_find(zVfs);
+  if (pVfs == NULL)
+  {
+    /* VFS not found */
+    int prefixLen = (int) strlen(SQLITE3MC_VFS_NAME);
+    if (strncmp(zVfs, SQLITE3MC_VFS_NAME, prefixLen) == 0)
+    {
+      /* VFS name starts with prefix. */
+      const char* zVfsNameEnd = zVfs + strlen(SQLITE3MC_VFS_NAME);
+      if (*zVfsNameEnd == '-')
+      {
+        /* Prefix separator found, determine the name of the real VFS. */
+        const char* zVfsReal = zVfsNameEnd + 1;
+        pVfs = sqlite3_vfs_find(zVfsReal);
+        if (pVfs != NULL)
+        {
+          /* Real VFS exists */
+          /* Create VFS with encryption support based on real VFS */
+          rc = sqlite3mc_vfs_create(zVfsReal, 0);
+        }
+      }
+    }
+  }
+  return rc;
+}
+
+SQLITE_PRIVATE int
+sqlite3mcPagerHasCodec(PagerMC* pPager)
+{
+  int hasCodec = 0;
+  sqlite3mc_vfs* pVfsMC = NULL;
+  sqlite3_vfs* pVfs = pPager->pVfs;
+
+  /* Check whether the VFS stack of the pager contains a Multiple Ciphers VFS */
+  for (; pVfs; pVfs = pVfs->pNext)
+  {
+    if (pVfs && pVfs->xOpen == mcVfsOpen)
+    {
+      /* Multiple Ciphers VFS found */
+      pVfsMC = (sqlite3mc_vfs*)(pVfs);
+      break;
+    }
+  }
+
+  /* Check whether codec is enabled for associated database file */
+  if (pVfsMC)
+  {
+    sqlite3mc_file* mcFile = mcFindDbMainFileName(pVfsMC, pPager->zFilename);
+    if (mcFile)
+    {
+      Codec* codec = mcFile->codec;
+      hasCodec = (codec != 0 && sqlite3mcIsEncrypted(codec));
+    }
+  }
+  return hasCodec;
 }
 
 /*

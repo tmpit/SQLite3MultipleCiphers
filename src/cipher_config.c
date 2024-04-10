@@ -3,7 +3,7 @@
 ** Purpose:     Configuration of SQLite codecs
 ** Author:      Ulrich Telle
 ** Created:     2020-03-02
-** Copyright:   (c) 2006-2021 Ulrich Telle
+** Copyright:   (c) 2006-2023 Ulrich Telle
 ** License:     MIT
 */
 
@@ -12,6 +12,8 @@
 
 /* --- Codec --- */
 
+SQLITE_PRIVATE int
+sqlite3mcGetGlobalCipherCount();
 
 SQLITE_PRIVATE Codec*
 sqlite3mcGetCodec(sqlite3* db, const char* zDbName);
@@ -52,6 +54,10 @@ sqlite3mc_config(sqlite3* db, const char* paramName, int newValue)
   int hasMaxPrefix = 0;
   CipherParams* param;
 
+#ifndef SQLITE_OMIT_AUTOINIT
+  if (sqlite3_initialize()) return value;
+#endif
+
   if (paramName == NULL || (db == NULL && newValue >= 0))
   {
     return value;
@@ -80,28 +86,30 @@ sqlite3mc_config(sqlite3* db, const char* paramName, int newValue)
   }
 
   param = codecParams[0].m_params;
-  for (; strlen(param->m_name) > 0; ++param)
+  for (; param->m_name[0] != 0; ++param)
   {
     if (sqlite3_stricmp(paramName, param->m_name) == 0) break;
   }
-  if (strlen(param->m_name) > 0)
+  if (param->m_name[0] != 0)
   {
+    int cipherCount = sqlite3mcGetGlobalCipherCount();
     if (db != NULL)
     {
       sqlite3_mutex_enter(db->mutex);
     }
     else
     {
-      sqlite3_mutex_enter(sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_MASTER));
+      sqlite3_mutex_enter(sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_MAIN));
     }
     value = (hasDefaultPrefix) ? param->m_default : (hasMinPrefix) ? param->m_minValue : (hasMaxPrefix) ? param->m_maxValue : param->m_value;
     if (!hasMinPrefix && !hasMaxPrefix && newValue >= 0 && newValue >= param->m_minValue && newValue <= param->m_maxValue)
     {
       int allowChange = 1;
+
       /* Allow cipher change only if new cipher is actually available */
       if (sqlite3_stricmp(paramName, "cipher") == 0)
       {
-        allowChange = (codecDescriptorTable[newValue - 1] != &mcDummyDescriptor);
+        allowChange = newValue > 0 && newValue <= cipherCount;
       }
 
       if (allowChange)
@@ -121,10 +129,63 @@ sqlite3mc_config(sqlite3* db, const char* paramName, int newValue)
     }
     else
     {
-      sqlite3_mutex_leave(sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_MASTER));
+      sqlite3_mutex_leave(sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_MAIN));
     }
   }
   return value;
+}
+
+SQLITE_API int
+sqlite3mc_cipher_count()
+{
+#ifndef SQLITE_OMIT_AUTOINIT
+  if (sqlite3_initialize()) return 0;
+#endif
+  return sqlite3mcGetGlobalCipherCount();
+}
+
+SQLITE_API int
+sqlite3mc_cipher_index(const char* cipherName)
+{
+  int count;
+  int j;
+#ifndef SQLITE_OMIT_AUTOINIT
+  if (sqlite3_initialize()) return -1;
+#endif
+  count = sqlite3mcGetGlobalCipherCount();
+  j = 0;
+  for (j = 0; j < count && globalCodecDescriptorTable[j].m_name[0] != 0; ++j)
+  {
+    if (sqlite3_stricmp(cipherName, globalCodecDescriptorTable[j].m_name) == 0) break;
+  }
+  return (j < count && globalCodecDescriptorTable[j].m_name[0] != 0) ? j + 1 : -1;
+}
+
+SQLITE_API const char*
+sqlite3mc_cipher_name(int cipherIndex)
+{
+  static char cipherName[CIPHER_NAME_MAXLEN] = "";
+  int count;
+  int j;
+#ifndef SQLITE_OMIT_AUTOINIT
+  if( sqlite3_initialize() ) return cipherName;
+#endif
+  count = sqlite3mcGetGlobalCipherCount();
+  j = 0;
+  cipherName[0] = '\0';
+  if (cipherIndex > 0 && cipherIndex <= count)
+  {
+    for (j = 0; j < count && globalCodecDescriptorTable[j].m_name[0] != 0; ++j)
+    {
+      if (cipherIndex == j + 1) break;
+    }
+    if (j < count && globalCodecDescriptorTable[j].m_name[0] != 0)
+    {
+      strncpy(cipherName, globalCodecDescriptorTable[j].m_name, CIPHER_NAME_MAXLEN - 1);
+      cipherName[CIPHER_NAME_MAXLEN - 1] = '\0';
+    }
+  }
+  return cipherName;
 }
 
 SQLITE_API int
@@ -134,6 +195,10 @@ sqlite3mc_config_cipher(sqlite3* db, const char* cipherName, const char* paramNa
   CodecParameter* codecParams;
   CipherParams* cipherParamTable = NULL;
   int j = 0;
+
+#ifndef SQLITE_OMIT_AUTOINIT
+  if (sqlite3_initialize()) return value;
+#endif
 
   if (cipherName == NULL || paramName == NULL)
   {
@@ -158,11 +223,11 @@ sqlite3mc_config_cipher(sqlite3* db, const char* cipherName, const char* paramNa
     return value;
   }
 
-  for (j = 0; strlen(codecParams[j].m_name) > 0; ++j)
+  for (j = 0; codecParams[j].m_name[0] != 0; ++j)
   {
     if (sqlite3_stricmp(cipherName, codecParams[j].m_name) == 0) break;
   }
-  if (strlen(codecParams[j].m_name) > 0)
+  if (codecParams[j].m_name[0] != 0)
   {
     cipherParamTable = codecParams[j].m_params;
   }
@@ -202,7 +267,7 @@ sqlite3mc_config_cipher(sqlite3* db, const char* cipherName, const char* paramNa
         {
           sqlite3mcConfigureSQLCipherVersion(db, hasDefaultPrefix, newValue);
         }
-        else
+        else if (newValue != -1)
         {
           sqlite3_log(SQLITE_WARNING,
                       "sqlite3mc_config_cipher: SQLCipher legacy version %d out of range [%d..%d]",
@@ -212,11 +277,11 @@ sqlite3mc_config_cipher(sqlite3* db, const char* cipherName, const char* paramNa
     }
 #endif
 
-    for (; strlen(param->m_name) > 0; ++param)
+    for (; param->m_name[0] != 0; ++param)
     {
       if (sqlite3_stricmp(paramName, param->m_name) == 0) break;
     }
-    if (strlen(param->m_name) > 0)
+    if (param->m_name[0] != 0)
     {
       if (db != NULL)
       {
@@ -238,7 +303,7 @@ sqlite3mc_config_cipher(sqlite3* db, const char* cipherName, const char* paramNa
           param->m_value = newValue;
           value = newValue;
         }
-        else
+        else if (newValue != -1)
         {
           sqlite3_log(SQLITE_WARNING,
                       "sqlite3mc_config_cipher: Value %d for parameter '%s' of cipher '%s' out of range [%d..%d]",
@@ -262,6 +327,9 @@ SQLITE_API unsigned char*
 sqlite3mc_codec_data(sqlite3* db, const char* zDbName, const char* paramName)
 {
   unsigned char* result = NULL;
+#ifndef SQLITE_OMIT_AUTOINIT
+  if (sqlite3_initialize()) return NULL;
+#endif
   if (db != NULL && paramName != NULL)
   {
     int iDb = (zDbName != NULL) ? sqlite3FindDbName(db, zDbName) : 0;
@@ -392,11 +460,11 @@ sqlite3mcConfigParams(sqlite3_context* context, int argc, sqlite3_value** argv)
 
   param1 = codecParams[0].m_params;
   cipherParamTable = NULL;
-  for (; strlen(param1->m_name) > 0; ++param1)
+  for (; param1->m_name[0] != 0; ++param1)
   {
     if (sqlite3_stricmp(nameParam1, param1->m_name) == 0) break;
   }
-  isCommonParam1 = strlen(param1->m_name) > 0;
+  isCommonParam1 = param1->m_name[0] != 0;
 
   /* Check first argument whether it is a cipher name, if it wasn't a common parameter */
   /* If the first argument is a cipher name, cipherParamTable will point to the corresponding cipher parameter table */
@@ -405,11 +473,11 @@ sqlite3mcConfigParams(sqlite3_context* context, int argc, sqlite3_value** argv)
     if (!hasDefaultPrefix && !hasMinPrefix && !hasMaxPrefix)
     {
       int j = 0;
-      for (j = 0; strlen(codecParams[j].m_name) > 0; ++j)
+      for (j = 0; codecParams[j].m_name[0] != 0; ++j)
       {
         if (sqlite3_stricmp(nameParam1, codecParams[j].m_name) == 0) break;
       }
-      isCipherParam1 = strlen(codecParams[j].m_name) > 0;
+      isCipherParam1 = codecParams[j].m_name[0] != 0;
       if (isCipherParam1)
       {
         cipherParamTable = codecParams[j].m_params;
@@ -431,7 +499,7 @@ sqlite3mcConfigParams(sqlite3_context* context, int argc, sqlite3_value** argv)
       int value = (hasDefaultPrefix) ? param1->m_default : (hasMinPrefix) ? param1->m_minValue : (hasMaxPrefix) ? param1->m_maxValue : param1->m_value;
       if (sqlite3_stricmp(nameParam1, "cipher") == 0)
       {
-        sqlite3_result_text(context, codecDescriptorTable[value - 1]->m_name, -1, SQLITE_STATIC);
+        sqlite3_result_text(context, globalCodecDescriptorTable[value - 1].m_name, -1, SQLITE_STATIC);
       }
       else
       {
@@ -444,7 +512,7 @@ sqlite3mcConfigParams(sqlite3_context* context, int argc, sqlite3_value** argv)
       int nParams = 0;
       int lenTotal = 0;
       int j;
-      for (j = 0; strlen(cipherParamTable[j].m_name) > 0; ++j)
+      for (j = 0; cipherParamTable[j].m_name[0] != 0; ++j)
       {
         ++nParams;
         lenTotal += (int) strlen(cipherParamTable[j].m_name);
@@ -490,18 +558,18 @@ sqlite3mcConfigParams(sqlite3_context* context, int argc, sqlite3_value** argv)
         {
           const char* nameCipher = (const char*)sqlite3_value_text(argv[1]);
           int j = 0;
-          for (j = 0; strlen(codecDescriptorTable[j]->m_name) > 0; ++j)
+          for (j = 0; globalCodecDescriptorTable[j].m_name[0] != 0; ++j)
           {
-            if (sqlite3_stricmp(nameCipher, codecDescriptorTable[j]->m_name) == 0) break;
+            if (sqlite3_stricmp(nameCipher, globalCodecDescriptorTable[j].m_name) == 0) break;
           }
-          if (strlen(codecDescriptorTable[j]->m_name) > 0)
+          if (globalCodecDescriptorTable[j].m_name[0] != 0)
           {
             if (hasDefaultPrefix)
             {
               param1->m_default = j + 1;
             }
             param1->m_value = j + 1;
-            sqlite3_result_text(context, codecDescriptorTable[j]->m_name, -1, SQLITE_STATIC);
+            sqlite3_result_text(context, globalCodecDescriptorTable[j].m_name, -1, SQLITE_STATIC);
           }
           else
           {
@@ -563,7 +631,7 @@ sqlite3mcConfigParams(sqlite3_context* context, int argc, sqlite3_value** argv)
         hasMaxPrefix = 1;
         nameParam2 += 4;
       }
-      for (; strlen(param2->m_name) > 0; ++param2)
+      for (; param2->m_name[0] != 0; ++param2)
       {
         if (sqlite3_stricmp(nameParam2, param2->m_name) == 0) break;
       }
@@ -586,7 +654,7 @@ sqlite3mcConfigParams(sqlite3_context* context, int argc, sqlite3_value** argv)
       }
 #endif
 
-      if (strlen(param2->m_name) > 0)
+      if (param2->m_name[0] != 0)
       {
         if (argc == 2)
         {
@@ -650,13 +718,13 @@ sqlite3mcConfigureFromUri(sqlite3* db, const char *zDbName, int configDefault)
       CipherParams* cipherParams = NULL;
 
       /* Try to locate the cipher name */
-      for (j = 1; strlen(globalCodecParameterTable[j].m_name) > 0; ++j)
+      for (j = 1; globalCodecParameterTable[j].m_name[0] != 0; ++j)
       {
         if (sqlite3_stricmp(cipherName, globalCodecParameterTable[j].m_name) == 0) break;
       }
 
       /* j is the index of the cipher name, if found */
-      cipherParams = (strlen(globalCodecParameterTable[j].m_name) > 0) ? globalCodecParameterTable[j].m_params : NULL;
+      cipherParams = (globalCodecParameterTable[j].m_name[0] != 0) ? globalCodecParameterTable[j].m_params : NULL;
       if (cipherParams != NULL)
       {
         /*
@@ -696,7 +764,7 @@ sqlite3mcConfigureFromUri(sqlite3* db, const char *zDbName, int configDefault)
 #endif
 
         /* Check all cipher specific parameters */
-        for (j = 0; strlen(cipherParams[j].m_name) > 0; ++j)
+        for (j = 0; cipherParams[j].m_name[0] != 0; ++j)
         {
           if (skipLegacy && sqlite3_stricmp(cipherParams[j].m_name, "legacy") == 0) continue;
 
@@ -773,15 +841,15 @@ sqlite3mcFileControlPragma(sqlite3* db, const char* zDbName, int op, void* pArg)
       {
         int j = 1;
         /* Try to locate the cipher name */
-        for (j = 1; strlen(globalCodecParameterTable[j].m_name) > 0; ++j)
+        for (j = 1; globalCodecParameterTable[j].m_name[0] != 0; ++j)
         {
           if (sqlite3_stricmp(pragmaValue, globalCodecParameterTable[j].m_name) == 0) break;
         }
-        cipherId = (strlen(globalCodecParameterTable[j].m_name) > 0) ? globalCodecParameterTable[j].m_id : CODEC_TYPE_UNKNOWN;
+        cipherId = (globalCodecParameterTable[j].m_name[0] != 0) ? globalCodecParameterTable[j].m_id : CODEC_TYPE_UNKNOWN;
       }
 
       /* cipherId is the numeric id of the cipher name, if found */
-      if ((cipherId == -1) || (cipherId > 0 && cipherId <= CODEC_TYPE_MAX))
+      if ((cipherId == -1) || (cipherId > 0 && cipherId <= CODEC_COUNT_MAX))
       {
         int value;
         if (configDefault)
@@ -793,7 +861,7 @@ sqlite3mcFileControlPragma(sqlite3* db, const char* zDbName, int op, void* pArg)
           value = sqlite3mc_config(db, "cipher", cipherId);
         }
         rc = SQLITE_OK;
-        ((char**)pArg)[0] = sqlite3_mprintf("%s", codecDescriptorTable[value - 1]->m_name);
+        ((char**)pArg)[0] = sqlite3_mprintf("%s", globalCodecDescriptorTable[value - 1].m_name);
       }
       else
       {
@@ -822,19 +890,41 @@ sqlite3mcFileControlPragma(sqlite3* db, const char* zDbName, int op, void* pArg)
       {
         ((char**)pArg)[0] = sqlite3_mprintf("ok");
       }
+      else
+      {
+        if (db->pErr)
+        {
+          const char* z = (const char*)sqlite3_value_text(db->pErr);
+          if (z && sqlite3Strlen30(z) > 0)
+          {
+            ((char**)pArg)[0] = sqlite3_mprintf(z);
+          }
+        }
+      }
     }
     else if (sqlite3StrICmp(pragmaName, "hexkey") == 0)
     {
       int nValue = sqlite3Strlen30(pragmaValue);
-      if (((nValue & 1) == 0) && (sqlite3mcIsHexKey(pragmaValue, nValue) != 0))
+      if (((nValue & 1) == 0) && (sqlite3mcIsHexKey((const unsigned char*) pragmaValue, nValue) != 0))
       {
-        char* zHexKey = sqlite3_malloc(nValue/2);
-        sqlite3mcConvertHex2Bin(pragmaValue, nValue, zHexKey);
+        unsigned char* zHexKey = sqlite3_malloc(nValue/2);
+        sqlite3mcConvertHex2Bin((const unsigned char*) pragmaValue, nValue, zHexKey);
         rc = sqlite3_key_v2(db, zDbName, zHexKey, nValue/2);
         sqlite3_free(zHexKey);
         if (rc == SQLITE_OK)
         {
           ((char**)pArg)[0] = sqlite3_mprintf("ok");
+        }
+        else
+        {
+          if (db->pErr)
+          {
+            const char* z = (const char*)sqlite3_value_text(db->pErr);
+            if (z && sqlite3Strlen30(z) > 0)
+            {
+              ((char**)pArg)[0] = sqlite3_mprintf(z);
+            }
+          }
         }
       }
       else
@@ -865,10 +955,10 @@ sqlite3mcFileControlPragma(sqlite3* db, const char* zDbName, int op, void* pArg)
     else if (sqlite3StrICmp(pragmaName, "hexrekey") == 0)
     {
       int nValue = sqlite3Strlen30(pragmaValue);
-      if (((nValue & 1) == 0) && (sqlite3mcIsHexKey(pragmaValue, nValue) != 0))
+      if (((nValue & 1) == 0) && (sqlite3mcIsHexKey((const unsigned char*) pragmaValue, nValue) != 0))
       {
-        char* zHexKey = sqlite3_malloc(nValue/2);
-        sqlite3mcConvertHex2Bin(pragmaValue, nValue, zHexKey);
+        unsigned char* zHexKey = sqlite3_malloc(nValue/2);
+        sqlite3mcConvertHex2Bin((const unsigned char*) pragmaValue, nValue, zHexKey);
         rc = sqlite3_rekey_v2(db, zDbName, zHexKey, nValue/2);
         sqlite3_free(zHexKey);
         if (rc == SQLITE_OK)
@@ -893,6 +983,54 @@ sqlite3mcFileControlPragma(sqlite3* db, const char* zDbName, int op, void* pArg)
         ((char**)pArg)[0] = sqlite3_mprintf("Malformed hex string");
       }
     }
+#if SQLITE3MC_SECURE_MEMORY
+    else if (sqlite3StrICmp(pragmaName, "memory_security") == 0)
+    {
+      if (pragmaValue)
+      {
+        int intValue = -1;
+        if (0 == sqlite3StrICmp(pragmaValue, "none"))
+        {
+          intValue = SECURE_MEMORY_NONE;
+        }
+        else if (0 == sqlite3StrICmp(pragmaValue, "fill") )
+        {
+          intValue = SECURE_MEMORY_FILL;
+        }
+#if SQLITE3MC_ENABLE_MEMLOCK
+        else if (0 == sqlite3StrICmp(pragmaValue, "lock") )
+        {
+          intValue = SECURE_MEMORY_LOCK;
+        }
+#endif
+        else
+        {
+          intValue = sqlite3Atoi(pragmaValue);
+#if SQLITE3MC_ENABLE_MEMLOCK
+          intValue = (intValue >=0 && intValue <= 2) ? intValue : -1;
+#else
+          intValue = (intValue >=0 && intValue <= 1) ? intValue : -1;
+#endif
+        }
+        if (intValue >= 0)
+        {
+          sqlite3mcSetMemorySecurity(intValue);
+          rc = SQLITE_OK;
+          ((char**)pArg)[0] = sqlite3_mprintf("%d", intValue);
+        }
+        else
+        {
+          rc = SQLITE_ERROR;
+          ((char**) pArg)[0] = sqlite3_mprintf("Secure memory option '%s' invalid.", pragmaValue);
+        }
+      }
+      else
+      {
+        rc = SQLITE_OK;
+        ((char**)pArg)[0] = sqlite3_mprintf("%d", sqlite3mcGetMemorySecurity());
+      }
+    }
+#endif /* SQLITE3MC_SECURE_MEMORY */
     else
     {
       int j;
@@ -904,21 +1042,21 @@ sqlite3mcFileControlPragma(sqlite3* db, const char* zDbName, int op, void* pArg)
       CipherParams* cipherParams = NULL;
 
       /* Try to locate the cipher name */
-      for (j = 1; strlen(globalCodecParameterTable[j].m_name) > 0; ++j)
+      for (j = 1; globalCodecParameterTable[j].m_name[0] != 0; ++j)
       {
         if (cipher == globalCodecParameterTable[j].m_id) break;
       }
 
       /* j is the index of the cipher name, if found */
-      cipherParams = (strlen(globalCodecParameterTable[j].m_name) > 0) ? globalCodecParameterTable[j].m_params : NULL;
+      cipherParams = (globalCodecParameterTable[j].m_name[0] != 0) ? globalCodecParameterTable[j].m_params : NULL;
       if (cipherParams != NULL)
       {
         const char* cipherName = globalCodecParameterTable[j].m_name;
-        for (j = 0; strlen(cipherParams[j].m_name) > 0; ++j)
+        for (j = 0; cipherParams[j].m_name[0] != 0; ++j)
         {
           if (sqlite3_stricmp(pragmaName, cipherParams[j].m_name) == 0) break;
         }
-        if (strlen(cipherParams[j].m_name) > 0)
+        if (cipherParams[j].m_name[0] != 0)
         {
           char* param = (configDefault) ? sqlite3_mprintf("default:%s", pragmaName) : pragmaName;
           if (isIntValue)

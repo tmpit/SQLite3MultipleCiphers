@@ -15,6 +15,8 @@
 #define AES_HARDWARE_NI    1
 #define AES_HARDWARE_NEON  2
 
+#ifndef SQLITE3MC_OMIT_AES_HARDWARE_SUPPORT
+
 #if defined __ARM_FEATURE_CRYPTO
 #define HAS_AES_HARDWARE AES_HARDWARE_NEON
 
@@ -71,6 +73,14 @@
 #define HAS_AES_HARDWARE AES_HARDWARE_NONE
 
 #endif
+
+#else /* SQLITE3MC_OMIT_AES_HARDWARE_SUPPORT defined */
+
+/* Omit AES hardware support */
+#define HAS_AES_HARDWARE AES_HARDWARE_NONE
+
+#endif /* SQLITE3MC_OMIT_AES_HARDWARE_SUPPORT */
+
 
 #if HAS_AES_HARDWARE != AES_HARDWARE_NONE
 /* --- Implementation of common data and functions for any AES hardware --- */
@@ -400,6 +410,7 @@ aesDecryptCBC(const unsigned char* in,
 #ifdef USE_CLANG_ATTR_TARGET_AARCH64
 #define __ARM_NEON 1
 #define __ARM_FEATURE_CRYPTO 1
+#define __ARM_FEATURE_AES 1
 #define FUNC_ISA __attribute__ ((target("neon,crypto")))
 #endif /* USE_CLANG_ATTR_TARGET_AARCH64 */
 
